@@ -1,12 +1,15 @@
 ﻿from __future__ import annotations
 
 import json
-from typing import Dict, Iterable, List
+from typing import Callable, Dict, Iterable, List, Optional
 
 import srt
 
 from src.core.contracts.llm import LLMClient
 from src.utils.file_io import load_prompt
+
+# Progress callback: (current_chunk, total_chunks, pct) -> None
+ProgressCallback = Callable[[int, int, float], None]
 
 
 class SrtTranslator:
@@ -20,14 +23,27 @@ class SrtTranslator:
         self._prompt_path = prompt_path
         self._chunk_size = chunk_size
 
-    def translate(self, srt_text: str, source_lang: str, target_lang: str) -> str:
+    def translate(
+        self,
+        srt_text: str,
+        source_lang: str,
+        target_lang: str,
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> str:
         subtitles = list(srt.parse(srt_text))
         if not subtitles:
             return srt_text
 
         template = load_prompt(self._prompt_path)
+        chunks = list(self._chunked(subtitles, self._chunk_size))
+        total_chunks = len(chunks)
 
-        for chunk in self._chunked(subtitles, self._chunk_size):
+        for chunk_idx, chunk in enumerate(chunks):
+            # Report progress before translating this chunk
+            if progress_callback:
+                pct = (chunk_idx / total_chunks) * 100
+                progress_callback(chunk_idx + 1, total_chunks, pct)
+
             items_json = json.dumps(
                 [{"id": sub.index, "text": sub.content} for sub in chunk],
                 ensure_ascii=False,
@@ -46,6 +62,10 @@ class SrtTranslator:
             for sub in chunk:
                 if sub.index in mapping:
                     sub.content = mapping[sub.index]
+
+        # Report 100% completion
+        if progress_callback:
+            progress_callback(total_chunks, total_chunks, 100.0)
 
         return srt.compose(subtitles)
 

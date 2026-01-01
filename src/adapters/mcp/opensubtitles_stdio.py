@@ -48,7 +48,7 @@ class OpenSubtitlesMCPStdioAdapter(SubtitleSearchTool):
             env=env,
             tool_search=os.getenv("MCP_OPENSUBTITLES_TOOL_SEARCH", "search_subtitles").strip(),
             tool_download=os.getenv("MCP_OPENSUBTITLES_TOOL_DOWNLOAD", "download_subtitle").strip(),
-            timeout_s=float(os.getenv("MCP_OPENSUBTITLES_TIMEOUT_S", "30")),
+            timeout_s=float(os.getenv("MCP_OPENSUBTITLES_TIMEOUT_S", "10")),
             logger=logger,
         )
 
@@ -114,7 +114,10 @@ class OpenSubtitlesMCPStdioAdapter(SubtitleSearchTool):
         if not self._command:
             raise ValueError("MCP_OPENSUBTITLES_COMMAND is not set")
 
-        # Build the JSON-RPC requests
+        import threading
+        import time
+
+        # Build all requests to send at once
         init_request = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -125,7 +128,7 @@ class OpenSubtitlesMCPStdioAdapter(SubtitleSearchTool):
                 "clientInfo": {"name": "python-client", "version": "1.0.0"}
             }
         }
-
+        init_notification = {"jsonrpc": "2.0", "method": "notifications/initialized"}
         tool_request = {
             "jsonrpc": "2.0",
             "id": 2,
@@ -133,11 +136,21 @@ class OpenSubtitlesMCPStdioAdapter(SubtitleSearchTool):
             "params": {"name": tool_name, "arguments": arguments}
         }
 
+        # Combine all requests into single input
+        input_data = "\n".join([
+            json.dumps(init_request),
+            json.dumps(init_notification),
+            json.dumps(tool_request),
+        ]) + "\n"
+
         # Merge environment
         merged_env = {**os.environ, **self._env}
 
-        # Run subprocess in binary mode
+        # Run subprocess with Popen
         cmd = [self._command] + self._args
+
+        print(f"[DEBUG] Starting subprocess for {tool_name}", flush=True)
+
         process = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -146,48 +159,62 @@ class OpenSubtitlesMCPStdioAdapter(SubtitleSearchTool):
             env=merged_env,
         )
 
+        print(f"[DEBUG] Subprocess started, PID={process.pid}", flush=True)
+
+        # Write input and close stdin to signal we're done sending
+        process.stdin.write(input_data.encode("utf-8"))
+        process.stdin.flush()
+        process.stdin.close()
+
+        # Read stdout lines in a separate thread with timeout
+        result = None
+        lines_read = []
+
+        def read_output():
+            nonlocal result, lines_read
+            try:
+                for line in process.stdout:
+                    line_str = line.decode("utf-8", errors="replace").strip()
+                    if not line_str:
+                        continue
+                    lines_read.append(line_str)
+                    print(f"[DEBUG] Received line: {line_str[:200]}...", flush=True)
+                    try:
+                        response = json.loads(line_str)
+                        if response.get("id") == 2:
+                            result = response
+                            return  # Got what we need
+                    except json.JSONDecodeError:
+                        continue
+            except Exception as e:
+                print(f"[DEBUG] Read error: {e}", flush=True)
+
+        reader_thread = threading.Thread(target=read_output, daemon=True)
+        reader_thread.start()
+        reader_thread.join(timeout=self._timeout_s)
+
+        # Kill the process regardless (MCP server stays alive otherwise)
         try:
-            # Send init request
-            process.stdin.write((json.dumps(init_request) + "\n").encode("utf-8"))
-            process.stdin.flush()
-
-            # Read init response
-            init_response = process.stdout.readline().decode("utf-8", errors="replace")
-
-            # Send initialized notification
-            init_notification = {"jsonrpc": "2.0", "method": "notifications/initialized"}
-            process.stdin.write((json.dumps(init_notification) + "\n").encode("utf-8"))
-            process.stdin.flush()
-
-            # Send tool request
-            process.stdin.write((json.dumps(tool_request) + "\n").encode("utf-8"))
-            process.stdin.flush()
-
-            # Read responses until we get the tool result
-            result = None
-            for _ in range(10):  # Max 10 lines
-                line = process.stdout.readline()
-                if not line:
-                    break
-                try:
-                    decoded = line.decode("utf-8", errors="replace")
-                    response = json.loads(decoded)
-                    if response.get("id") == 2:
-                        result = response
-                        break
-                except json.JSONDecodeError:
-                    continue
-
-            if result and "result" in result:
-                return _extract_tool_result_from_jsonrpc(result["result"])
-            elif result and "error" in result:
-                raise RuntimeError(f"MCP error: {result['error']}")
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                    capture_output=True
+                )
             else:
-                raise RuntimeError("No valid response from MCP server")
-
-        finally:
-            process.terminate()
+                process.kill()
             process.wait(timeout=5)
+        except Exception:
+            pass
+
+        print(f"[DEBUG] Read {len(lines_read)} lines, result found: {result is not None}", flush=True)
+
+        if result and "result" in result:
+            return _extract_tool_result_from_jsonrpc(result["result"])
+        elif result and "error" in result:
+            raise RuntimeError(f"MCP error: {result['error']}")
+        else:
+            # Return empty on timeout/no result
+            return {"subtitles": []}
 
 
 def _decode_base64(value: str) -> bytes:

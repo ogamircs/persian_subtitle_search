@@ -2,7 +2,7 @@
 
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from src.core.contracts.tools import SubtitleSearchTool
 from src.core.schemas.subtitles import (
@@ -11,7 +11,7 @@ from src.core.schemas.subtitles import (
     SubtitlePipelineResult,
     SubtitleSearchQuery,
 )
-from src.models.llm.srt_translator import SrtTranslator
+from src.models.llm.srt_translator import ProgressCallback, SrtTranslator
 from src.monitoring.mlflow_utils import MLflowLogger
 from src.utils.encoding import decode_bytes
 from src.utils.file_io import safe_filename, write_text_utf8
@@ -146,6 +146,7 @@ class SubtitleSearchPipeline:
         movie_name: str,
         item: SubtitleItem,
         target_lang: str,
+        progress_callback: Optional[ProgressCallback] = None,
     ) -> SubtitlePipelineResult:
         run_name = f"subtitle-download-{safe_filename(movie_name)}"
         with self._logger.start_run(run_name=run_name):
@@ -166,6 +167,7 @@ class SubtitleSearchPipeline:
                     content_text,
                     source_lang=item.language,
                     target_lang=target_lang,
+                    progress_callback=progress_callback,
                 )
                 translated = True
 

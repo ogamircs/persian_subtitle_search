@@ -8,7 +8,7 @@ from src.adapters.apis.openai_translator import OpenAIChatClient
 from src.adapters.mcp.opensubtitles_client import OpenSubtitlesMCPAdapter
 from src.adapters.mcp.opensubtitles_stdio import OpenSubtitlesMCPStdioAdapter
 from src.core.schemas.subtitles import SubtitleItem, SubtitlePipelineResult
-from src.models.llm.srt_translator import SrtTranslator
+from src.models.llm.srt_translator import ProgressCallback, SrtTranslator
 from src.monitoring.mlflow_utils import MLflowLogger
 from src.pipelines.inference.subtitle_search_pipeline import SubtitleSearchPipeline
 
@@ -33,8 +33,9 @@ class SubtitleService:
         movie_name: str,
         item: SubtitleItem,
         target_lang: str,
+        progress_callback: Optional[ProgressCallback] = None,
     ) -> SubtitlePipelineResult:
-        return self._pipeline.download_selected(movie_name, item, target_lang)
+        return self._pipeline.download_selected(movie_name, item, target_lang, progress_callback)
 
 
 def build_service_from_env() -> SubtitleService:

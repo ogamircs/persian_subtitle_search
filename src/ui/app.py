@@ -44,25 +44,42 @@ def main() -> None:
             if not movie_name.strip():
                 st.warning("Please enter a movie name.")
             else:
-                with st.spinner("Searching for subtitles..."):
+                try:
+                    status = st.empty()
+                    parsed_year = int(year) if year.strip().isdigit() else None
+                    results = []
+
+                    # Search preferred language first
+                    status.info(f"Searching for {prefer_lang.upper()} subtitles...")
                     try:
-                        results = service.search(
+                        fa_results = service.search(
                             movie_name=movie_name,
-                            year=int(year) if year.strip().isdigit() else None,
+                            year=parsed_year,
                             language=prefer_lang,
                         )
-                        # When fallback is enabled, always search English too and combine results
-                        if prefer_lang == "fa" and fallback_to_english:
+                        results.extend(fa_results)
+                    except Exception as e:
+                        st.warning(f"Search for {prefer_lang.upper()} failed: {e}")
+
+                    # When fallback is enabled, also search English
+                    if prefer_lang == "fa" and fallback_to_english:
+                        status.info("Searching for EN subtitles...")
+                        try:
                             en_results = service.search(
                                 movie_name=movie_name,
-                                year=int(year) if year.strip().isdigit() else None,
+                                year=parsed_year,
                                 language="en",
                             )
-                            # Combine Persian and English results
-                            results = results + en_results
-                        st.session_state.results = results
-                    except Exception as exc:
-                        st.error(str(exc))
+                            results.extend(en_results)
+                        except Exception as e:
+                            st.warning(f"Search for EN failed: {e}")
+
+                    status.empty()
+                    st.session_state.results = results
+                    if not results:
+                        st.info("No subtitles found for this movie. Try a different search term or year.")
+                except Exception as exc:
+                    st.error(str(exc))
 
     with col_download:
         if st.button("Download best match"):
@@ -102,11 +119,31 @@ def main() -> None:
 
         if st.button("Download selected"):
             try:
-                result = service.download_selected(
-                    movie_name=movie_name,
-                    item=selected,
-                    target_lang=target_lang,
-                )
+                needs_translation = translate_to_persian and selected.language != "fa"
+
+                if needs_translation:
+                    progress_bar = st.progress(0, text="Downloading subtitle...")
+                    status_text = st.empty()
+
+                    def update_progress(current: int, total: int, pct: float):
+                        progress_bar.progress(int(pct), text=f"Translating to Persian... {int(pct)}%")
+                        status_text.text(f"Translating chunk {current}/{total}")
+
+                    result = service.download_selected(
+                        movie_name=movie_name,
+                        item=selected,
+                        target_lang=target_lang,
+                        progress_callback=update_progress,
+                    )
+                    progress_bar.progress(100, text="Translation complete!")
+                    status_text.empty()
+                else:
+                    result = service.download_selected(
+                        movie_name=movie_name,
+                        item=selected,
+                        target_lang=target_lang,
+                    )
+
                 st.success(f"Saved to {result.file_path}")
                 st.download_button(
                     label="Download SRT",
