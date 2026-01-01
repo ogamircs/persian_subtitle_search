@@ -51,12 +51,15 @@ def main() -> None:
                             year=int(year) if year.strip().isdigit() else None,
                             language=prefer_lang,
                         )
-                        if not results and prefer_lang == "fa" and fallback_to_english:
-                            results = service.search(
+                        # When fallback is enabled, always search English too and combine results
+                        if prefer_lang == "fa" and fallback_to_english:
+                            en_results = service.search(
                                 movie_name=movie_name,
                                 year=int(year) if year.strip().isdigit() else None,
                                 language="en",
                             )
+                            # Combine Persian and English results
+                            results = results + en_results
                         st.session_state.results = results
                     except Exception as exc:
                         st.error(str(exc))
