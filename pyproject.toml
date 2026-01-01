@@ -1,0 +1,39 @@
+[project]
+name = "persian-subtitle-search"
+version = "0.1.0"
+description = "Search, download, and translate subtitles via MCP with a Streamlit UI."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "chardet==5.2.0",
+    "httpx==0.27.0",
+    "mcp==1.2.0",
+    "mlflow==2.15.1",
+    "pydantic==2.11.1",
+    "python-dotenv==1.0.1",
+    "setuptools==70.0.0",
+    "srt==3.5.3",
+]
+
+[project.optional-dependencies]
+train = []
+inference = [
+    "streamlit==1.36.0",
+]
+dev = [
+    "pytest==8.3.2",
+    "ruff==0.5.6",
+]
+llm = [
+    "openai==1.40.3",
+]
+ui = [
+    "streamlit==1.36.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.ruff]
+line-length = 100
