@@ -10,6 +10,7 @@ class SubtitleSearchQuery(BaseModel):
     year: Optional[int] = None
     language: str = Field(..., min_length=2, max_length=8)
     imdb_id: Optional[int] = None
+    type: Optional[str] = None  # movie, tvshow, episode, all
 
 
 class SubtitleItem(BaseModel):

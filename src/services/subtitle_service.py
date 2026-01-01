@@ -17,8 +17,15 @@ class SubtitleService:
     def __init__(self, pipeline: SubtitleSearchPipeline) -> None:
         self._pipeline = pipeline
 
-    def search(self, movie_name: str, year: Optional[int], language: str) -> List[SubtitleItem]:
-        return self._pipeline.search(movie_name, year, language)
+    def search(
+        self,
+        movie_name: str,
+        year: Optional[int],
+        language: str,
+        imdb_id: Optional[int] = None,
+        type: Optional[str] = None,
+    ) -> List[SubtitleItem]:
+        return self._pipeline.search(movie_name, year, language, imdb_id, type)
 
     def download_best(
         self,
@@ -39,6 +46,8 @@ class SubtitleService:
 
 
 def build_service_from_env() -> SubtitleService:
+    from src.adapters.mcp.imdb_lookup import IMDBLookupAdapter
+
     logger = MLflowLogger.from_env()
     mode = os.getenv("MCP_OPENSUBTITLES_MODE", "http").strip().lower()
     if mode == "stdio":
@@ -50,5 +59,14 @@ def build_service_from_env() -> SubtitleService:
     prompt_path = os.getenv("PROMPT_TRANSLATE_SRT", "prompts/translate_srt.txt")
     translator = SrtTranslator(llm_client, prompt_path) if llm_client else None
     storage_dir = Path(os.getenv("SUBTITLE_STORAGE_DIR", "data/processed/subtitles"))
-    pipeline = SubtitleSearchPipeline(tool, translator, logger, storage_dir)
+
+    # Create IMDB lookup adapter for fallback
+    imdb_lookup = None
+    if os.getenv("IMDB_MCP_ENABLED", "true").strip().lower() == "true":
+        try:
+            imdb_lookup = IMDBLookupAdapter.from_env()
+        except Exception as e:
+            print(f"[WARN] Failed to initialize IMDB lookup: {e}", flush=True)
+
+    pipeline = SubtitleSearchPipeline(tool, translator, logger, storage_dir, imdb_lookup)
     return SubtitleService(pipeline)

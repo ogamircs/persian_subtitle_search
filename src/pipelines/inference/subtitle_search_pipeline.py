@@ -2,7 +2,7 @@
 
 import time
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import TYPE_CHECKING, Callable, List, Optional
 
 from src.core.contracts.tools import SubtitleSearchTool
 from src.core.schemas.subtitles import (
@@ -16,6 +16,9 @@ from src.monitoring.mlflow_utils import MLflowLogger
 from src.utils.encoding import decode_bytes
 from src.utils.file_io import safe_filename, write_text_utf8
 
+if TYPE_CHECKING:
+    from src.adapters.mcp.imdb_lookup import IMDBLookupAdapter
+
 
 class SubtitleSearchPipeline:
     def __init__(
@@ -24,23 +27,67 @@ class SubtitleSearchPipeline:
         translator: Optional[SrtTranslator],
         logger: MLflowLogger,
         storage_dir: Path,
+        imdb_lookup: Optional["IMDBLookupAdapter"] = None,
     ) -> None:
         self._tool = tool
         self._translator = translator
         self._logger = logger
         self._storage_dir = storage_dir
+        self._imdb_lookup = imdb_lookup
 
-    def search(self, movie_name: str, year: Optional[int], language: str) -> List[SubtitleItem]:
+    def search(
+        self,
+        movie_name: str,
+        year: Optional[int],
+        language: str,
+        imdb_id: Optional[int] = None,
+        type: Optional[str] = None,
+    ) -> List[SubtitleItem]:
         query = SubtitleSearchQuery(
             movie_name=movie_name,
             year=year,
             language=language,
+            imdb_id=imdb_id,
+            type=type,
         )
         start = time.perf_counter()
         result = self._tool.search(query)
         latency_ms = (time.perf_counter() - start) * 1000
         self._logger.log_metric("search_latency_ms", latency_ms)
         self._logger.log_metric("search_count", len(result.items))
+
+        # If no results and no IMDB ID was provided, try looking up IMDB ID
+        if not result.items and imdb_id is None and self._imdb_lookup:
+            print(f"[DEBUG] No results found, trying IMDB lookup for '{movie_name}'", flush=True)
+            try:
+                imdb_result = self._imdb_lookup.lookup_best_match(movie_name, year, type)
+                if imdb_result:
+                    # Extract numeric ID from tt-prefixed string
+                    imdb_id_str = imdb_result.imdb_id.lower().replace("tt", "")
+                    if imdb_id_str.isdigit():
+                        found_imdb_id = int(imdb_id_str)
+                        # Determine type from IMDB result
+                        found_type = type
+                        if imdb_result.type == "tvSeries":
+                            found_type = "tvshow"
+                        elif imdb_result.type == "movie":
+                            found_type = "movie"
+
+                        print(f"[DEBUG] Found IMDB ID: {imdb_result.imdb_id} ({imdb_result.title}), retrying search", flush=True)
+
+                        # Retry search with IMDB ID
+                        retry_query = SubtitleSearchQuery(
+                            movie_name=movie_name,
+                            year=year,
+                            language=language,
+                            imdb_id=found_imdb_id,
+                            type=found_type,
+                        )
+                        result = self._tool.search(retry_query)
+                        self._logger.log_metric("search_count_after_imdb_lookup", len(result.items))
+            except Exception as e:
+                print(f"[DEBUG] IMDB lookup failed: {e}", flush=True)
+
         return result.items
 
     @staticmethod

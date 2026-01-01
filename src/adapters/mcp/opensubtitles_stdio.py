@@ -60,7 +60,13 @@ class OpenSubtitlesMCPStdioAdapter(SubtitleSearchTool):
         if query.year is not None:
             arguments["year"] = query.year
         if query.imdb_id is not None:
-            arguments["imdb_id"] = query.imdb_id
+            # For TV shows, use parent_imdb_id instead of imdb_id
+            if query.type == "tvshow":
+                arguments["parent_imdb_id"] = query.imdb_id
+            else:
+                arguments["imdb_id"] = query.imdb_id
+        if query.type is not None:
+            arguments["type"] = query.type
         result = self._run_tool(self._tool_search, arguments)
         items = []
         # Handle different response formats from MCP server
