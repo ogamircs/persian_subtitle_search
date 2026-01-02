@@ -73,13 +73,15 @@ class OpenAIChatClient(LLMClient):
                 - Translator notes
                 - Formatting commentary
                 - Preserve original formatting exactly unless translation requires minimal adjustment for readability.
-                - **just output the translation and nothing else**, no explaining, etc.
+                - Avoid quotes like a car it approaching or noise in the building or subtitles by X, etc. 
+                  and focus on the words that are spoken by the characters even when these are part of the original file
+                - Make sure that all sentences are translated and nothing is remaining in english and if you are not sure about the translation do your best guess
 
                 ---
                 ## 🔹 Quality Standard
                 Your translation should feel:
                 - Professionally subtitled  
-                - Emotionally faithful  
+                - Emotionally and tonality faithful (formal sentences to formal and informal ones to informal)
                 - Native-level fluent  
                 - Invisible to the viewer (no sense of “translation”)
 

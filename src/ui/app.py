@@ -1,8 +1,10 @@
 ﻿from __future__ import annotations
 
+import io
 import os
 import re
 import sys
+import zipfile
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
@@ -63,16 +65,48 @@ def group_by_season_episode(results) -> Dict[int, Dict[int, List]]:
 
 
 @st.cache_resource
-def get_service():
+def get_service(_model: str = None):
     load_dotenv()
+    # Temporarily set the environment variable for this service instance
+    if _model:
+        os.environ["OPENAI_MODEL"] = _model
     return build_service_from_env()
 
 
 def main() -> None:
     load_dotenv()
     st.set_page_config(page_title="Persian Subtitle Search", layout="centered")
-    st.title("Persian Subtitle Search")
+
+    # Title with settings button
+    col_title, col_settings = st.columns([5, 1])
+    with col_title:
+        st.title("Persian Subtitle Search")
+    with col_settings:
+        st.write("")  # Spacer
+        if st.button("⚙️ Settings", key="open_settings"):
+            st.session_state.show_settings = not st.session_state.get("show_settings", False)
+
     st.write("Search OpenSubtitles via MCP and download Persian subtitles.")
+
+    # Settings dialog
+    if "openai_model" not in st.session_state:
+        st.session_state.openai_model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+
+    if st.session_state.get("show_settings", False):
+        with st.container():
+            st.divider()
+            st.subheader("⚙️ Settings")
+
+            openai_model = st.selectbox(
+                "OpenAI Translation Model",
+                options=["gpt-4o-mini", "gpt-5-mini", "gpt-5-nano", "gpt-5.2", "gpt-oss-120b"],
+                index=["gpt-4o-mini", "gpt-5-mini", "gpt-5-nano", "gpt-5.2", "gpt-oss-120b"].index(st.session_state.openai_model) if st.session_state.openai_model in ["gpt-4o-mini", "gpt-5-mini", "gpt-5-nano", "gpt-5.2", "gpt-oss-120b"] else 1,
+                help="Select the OpenAI model to use for translating subtitles"
+            )
+            st.session_state.openai_model = openai_model
+
+            st.info("💡 Tip: Faster models (gpt-5-nano, gpt-4o-mini) are cheaper but may be less accurate. Slower models (gpt-5.2) provide better translation quality.")
+            st.divider()
 
     movie_name = st.text_input("Movie/TV Show name")
     col_year, col_imdb, col_type = st.columns(3)
@@ -93,7 +127,7 @@ def main() -> None:
     if "results" not in st.session_state:
         st.session_state.results = []
 
-    service = get_service()
+    service = get_service(_model=st.session_state.openai_model)
 
     col_search, col_download = st.columns(2)
 
@@ -193,9 +227,131 @@ def main() -> None:
             if "selected_item" not in st.session_state:
                 st.session_state.selected_item = None
 
+            # Initialize season download state
+            if "season_download_data" not in st.session_state:
+                st.session_state.season_download_data = {}
+
             # Display organized results
             for season in sorted(grouped.keys()):
                 with st.expander(f"Season {season}", expanded=(season == min(grouped.keys()))):
+                    # Download All Season button
+                    season_episodes = grouped[season]
+                    total_episodes = len(season_episodes)
+                    season_key = f"season_{season}"
+
+                    # Check if we have already downloaded this season
+                    if season_key in st.session_state.season_download_data:
+                        zip_data = st.session_state.season_download_data[season_key]
+                        zip_filename = f"{movie_name.replace(' ', '_')}_Season_{season}.zip"
+
+                        st.success(f"Season {season} ready for download!")
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            st.download_button(
+                                label=f"Download Season {season} ZIP ({total_episodes} episodes)",
+                                data=zip_data,
+                                file_name=zip_filename,
+                                mime="application/zip",
+                                key=f"download_zip_{season}"
+                            )
+                        with col2:
+                            if st.button("Clear", key=f"clear_season_{season}"):
+                                del st.session_state.season_download_data[season_key]
+                                st.rerun()
+                    else:
+                        # Two buttons: Download Original and Download + Translate
+                        col_orig, col_translate = st.columns(2)
+
+                        with col_orig:
+                            download_original_btn = st.button(
+                                f"⬇️ Download All (Original)",
+                                key=f"download_season_orig_{season}",
+                                help=f"Download all {total_episodes} episodes in their original language (fast)",
+                                use_container_width=True
+                            )
+
+                        with col_translate:
+                            download_translate_btn = st.button(
+                                f"🔄 Download All + Translate to FA",
+                                key=f"download_season_translate_{season}",
+                                type="primary",
+                                help=f"Download and translate all {total_episodes} episodes to Persian (slower)",
+                                use_container_width=True
+                            )
+
+                        if download_original_btn or download_translate_btn:
+                            # Determine if we should translate
+                            should_translate = download_translate_btn
+                            try:
+                                # Create containers for progress
+                                progress_container = st.container()
+
+                                with progress_container:
+                                    # Create a zip file in memory
+                                    zip_buffer = io.BytesIO()
+
+                                    with st.spinner(f"Preparing to download Season {season}..."):
+                                        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                                            progress_bar = st.progress(0)
+                                            status_text = st.empty()
+
+                                            episode_list = sorted(season_episodes.keys())
+                                            for idx, episode in enumerate(episode_list):
+                                                try:
+                                                    items = season_episodes[episode]
+                                                    # Get the best item for this episode (highest score/download count)
+                                                    best_item = max(items, key=lambda x: (x.score or 0.0, x.download_count or 0))
+
+                                                    # Show download status
+                                                    lang_label = best_item.language.upper()
+                                                    status_text.info(f"📥 Downloading S{season:02d}E{episode:02d} [{lang_label}]... ({idx + 1}/{total_episodes})")
+
+                                                    # Determine target language based on button clicked
+                                                    target_lang = "fa" if should_translate else best_item.language
+
+                                                    # Create a progress callback for translation
+                                                    translation_status = st.empty()
+
+                                                    def progress_callback(current: int, total: int, pct: float):
+                                                        translation_status.info(f"🔄 Translating S{season:02d}E{episode:02d} to Persian... {int(pct)}% (chunk {current}/{total})")
+
+                                                    # Download the subtitle (with translation if needed)
+                                                    result = service.download_selected(
+                                                        movie_name=movie_name,
+                                                        item=best_item,
+                                                        target_lang=target_lang,
+                                                        progress_callback=progress_callback if should_translate and best_item.language != "fa" else None,
+                                                    )
+
+                                                    translation_status.empty()
+
+                                                    # Add to zip with a meaningful name
+                                                    file_name = f"S{season:02d}E{episode:02d}.{target_lang}.srt"
+                                                    zip_file.writestr(file_name, result.content_text)
+
+                                                    # Update progress
+                                                    progress = (idx + 1) / total_episodes
+                                                    progress_bar.progress(progress)
+                                                    status_text.success(f"✅ Completed S{season:02d}E{episode:02d} ({idx + 1}/{total_episodes})")
+                                                except Exception as ep_error:
+                                                    status_text.warning(f"❌ Failed S{season:02d}E{episode:02d}: {str(ep_error)}")
+                                                    # Continue with next episode even if one fails
+                                                    continue
+
+                                            status_text.success("All episodes downloaded!")
+                                            progress_bar.progress(1.0)
+
+                                    # Store the zip data in session state
+                                    zip_buffer.seek(0)
+                                    st.session_state.season_download_data[season_key] = zip_buffer.getvalue()
+
+                                    # Force a rerun to show the download button
+                                    st.rerun()
+                            except Exception as exc:
+                                st.error(f"Error downloading season: {exc}")
+
+                    st.divider()
+
                     for episode in sorted(grouped[season].keys()):
                         items = grouped[season][episode]
 
