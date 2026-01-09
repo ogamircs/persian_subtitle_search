@@ -74,8 +74,8 @@ def get_service(_model: str = None):
 
 
 def main() -> None:
-    load_dotenv()
     st.set_page_config(page_title="Persian Subtitle Search", layout="centered")
+    load_dotenv()
 
     # Title with settings button
     col_title, col_settings = st.columns([5, 1])
