@@ -571,83 +571,83 @@ def main() -> None:
                 st.info("No results match your filter.")
                 selected = None
 
-        # Download section for selected item
-        if selected:
-            st.divider()
-            st.markdown(f"**Selected:** {selected.release or selected.file_name}")
+            # Download section for selected item (movie mode only)
+            if selected:
+                st.divider()
+                st.markdown(f"**Selected:** {selected.release or selected.file_name}")
 
-            is_non_persian = selected.language != "fa"
+                is_non_persian = selected.language != "fa"
 
-            if is_non_persian:
-                col_orig, col_translate = st.columns(2)
+                if is_non_persian:
+                    col_orig, col_translate = st.columns(2)
 
-                with col_orig:
-                    download_original = st.button(f"Download Original ({selected.language.upper()})")
+                    with col_orig:
+                        download_original = st.button(f"Download Original ({selected.language.upper()})")
 
-                with col_translate:
-                    download_translated = st.button("Translate to Persian")
+                    with col_translate:
+                        download_translated = st.button("Translate to Persian")
 
-                if download_original:
-                    try:
-                        result = service.download_selected(
-                            movie_name=movie_name,
-                            item=selected,
-                            target_lang=selected.language,
-                        )
-                        st.success(f"Saved to {result.file_path}")
-                        st.download_button(
-                            label=f"Download SRT ({selected.language.upper()})",
-                            data=result.content_bytes,
-                            file_name=os.path.basename(result.file_path),
-                            mime="application/x-subrip",
-                        )
-                    except Exception as exc:
-                        st.error(str(exc))
+                    if download_original:
+                        try:
+                            result = service.download_selected(
+                                movie_name=movie_name,
+                                item=selected,
+                                target_lang=selected.language,
+                            )
+                            st.success(f"Saved to {result.file_path}")
+                            st.download_button(
+                                label=f"Download SRT ({selected.language.upper()})",
+                                data=result.content_bytes,
+                                file_name=os.path.basename(result.file_path),
+                                mime="application/x-subrip",
+                            )
+                        except Exception as exc:
+                            st.error(str(exc))
 
-                if download_translated:
-                    try:
-                        progress_bar = st.progress(0, text="Downloading subtitle...")
-                        status_text = st.empty()
+                    if download_translated:
+                        try:
+                            progress_bar = st.progress(0, text="Downloading subtitle...")
+                            status_text = st.empty()
 
-                        def update_progress(current: int, total: int, pct: float):
-                            progress_bar.progress(int(pct), text=f"Translating to Persian... {int(pct)}%")
-                            status_text.text(f"Translating chunk {current}/{total}")
+                            def update_progress(current: int, total: int, pct: float):
+                                progress_bar.progress(int(pct), text=f"Translating to Persian... {int(pct)}%")
+                                status_text.text(f"Translating chunk {current}/{total}")
 
-                        result = service.download_selected(
-                            movie_name=movie_name,
-                            item=selected,
-                            target_lang="fa",
-                            progress_callback=update_progress,
-                        )
-                        progress_bar.progress(100, text="Translation complete!")
-                        status_text.empty()
+                            result = service.download_selected(
+                                movie_name=movie_name,
+                                item=selected,
+                                target_lang="fa",
+                                progress_callback=update_progress,
+                            )
+                            progress_bar.progress(100, text="Translation complete!")
+                            status_text.empty()
 
-                        st.success(f"Saved to {result.file_path}")
-                        st.download_button(
-                            label="Download SRT (Persian)",
-                            data=result.content_bytes,
-                            file_name=os.path.basename(result.file_path),
-                            mime="application/x-subrip",
-                        )
-                    except Exception as exc:
-                        st.error(str(exc))
-            else:
-                if st.button("Download selected"):
-                    try:
-                        result = service.download_selected(
-                            movie_name=movie_name,
-                            item=selected,
-                            target_lang="fa",
-                        )
-                        st.success(f"Saved to {result.file_path}")
-                        st.download_button(
-                            label="Download SRT",
-                            data=result.content_bytes,
-                            file_name=os.path.basename(result.file_path),
-                            mime="application/x-subrip",
-                        )
-                    except Exception as exc:
-                        st.error(str(exc))
+                            st.success(f"Saved to {result.file_path}")
+                            st.download_button(
+                                label="Download SRT (Persian)",
+                                data=result.content_bytes,
+                                file_name=os.path.basename(result.file_path),
+                                mime="application/x-subrip",
+                            )
+                        except Exception as exc:
+                            st.error(str(exc))
+                else:
+                    if st.button("Download selected"):
+                        try:
+                            result = service.download_selected(
+                                movie_name=movie_name,
+                                item=selected,
+                                target_lang="fa",
+                            )
+                            st.success(f"Saved to {result.file_path}")
+                            st.download_button(
+                                label="Download SRT",
+                                data=result.content_bytes,
+                                file_name=os.path.basename(result.file_path),
+                                mime="application/x-subrip",
+                            )
+                        except Exception as exc:
+                            st.error(str(exc))
 
 
 main()
