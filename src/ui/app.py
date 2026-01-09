@@ -223,13 +223,15 @@ def main() -> None:
                 key="result_filter"
             )
 
-            # Store selected item
-            if "selected_item" not in st.session_state:
-                st.session_state.selected_item = None
+            # Initialize selection state for checkboxes
+            if "selected_items" not in st.session_state:
+                st.session_state.selected_items = set()
 
             # Initialize season download state
             if "season_download_data" not in st.session_state:
                 st.session_state.season_download_data = {}
+            if "selected_download_data" not in st.session_state:
+                st.session_state.selected_download_data = None
 
             # Display organized results
             for season in sorted(grouped.keys()):
@@ -372,13 +374,27 @@ def main() -> None:
                             downloads = f"downloads: {item.download_count}" if item.download_count else ""
                             lang_badge = f"[{item.language.upper()}]"
 
+                            # Create unique identifier for this item
+                            item_id = f"s{season}_e{episode}_{i}"
+
                             col1, col2 = st.columns([4, 1])
                             with col1:
                                 st.caption(f"{lang_badge} {release} {downloads}")
                             with col2:
-                                btn_key = f"select_s{season}_e{episode}_{i}"
-                                if st.button("Select", key=btn_key):
-                                    st.session_state.selected_item = item
+                                is_selected = st.checkbox(
+                                    "Select",
+                                    value=item_id in st.session_state.selected_items,
+                                    key=f"check_{item_id}",
+                                    label_visibility="collapsed"
+                                )
+                                if is_selected:
+                                    st.session_state.selected_items.add(item_id)
+                                    # Store the actual item object for later use
+                                    if not hasattr(st.session_state, 'item_map'):
+                                        st.session_state.item_map = {}
+                                    st.session_state.item_map[item_id] = item
+                                elif item_id in st.session_state.selected_items:
+                                    st.session_state.selected_items.remove(item_id)
 
             # Show ungrouped items if any
             if ungrouped:
@@ -393,15 +409,137 @@ def main() -> None:
                         for i, item in enumerate(ungrouped):
                             release = item.release or item.file_name or item.subtitle_id
                             downloads = f"downloads: {item.download_count}" if item.download_count else ""
+
+                            # Create unique identifier for this item
+                            item_id = f"other_{i}"
+
                             col1, col2 = st.columns([4, 1])
                             with col1:
                                 st.caption(f"[{item.language.upper()}] {release} {downloads}")
                             with col2:
-                                if st.button("Select", key=f"select_other_{i}"):
-                                    st.session_state.selected_item = item
+                                is_selected = st.checkbox(
+                                    "Select",
+                                    value=item_id in st.session_state.selected_items,
+                                    key=f"check_{item_id}",
+                                    label_visibility="collapsed"
+                                )
+                                if is_selected:
+                                    st.session_state.selected_items.add(item_id)
+                                    if not hasattr(st.session_state, 'item_map'):
+                                        st.session_state.item_map = {}
+                                    st.session_state.item_map[item_id] = item
+                                elif item_id in st.session_state.selected_items:
+                                    st.session_state.selected_items.remove(item_id)
 
-            # Show selected item actions
-            selected = st.session_state.selected_item
+            # Show download buttons for selected items
+            if st.session_state.selected_items:
+                st.divider()
+                num_selected = len(st.session_state.selected_items)
+                st.info(f"✅ {num_selected} subtitle(s) selected")
+
+                # Check if we have a ready download
+                if st.session_state.selected_download_data:
+                    zip_data, zip_filename = st.session_state.selected_download_data
+                    st.success(f"Selected subtitles ready for download!")
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.download_button(
+                            label=f"Download {num_selected} Selected Subtitle(s)",
+                            data=zip_data,
+                            file_name=zip_filename,
+                            mime="application/zip",
+                            key="download_selected_zip"
+                        )
+                    with col2:
+                        if st.button("Clear", key="clear_selected"):
+                            st.session_state.selected_download_data = None
+                            st.rerun()
+                else:
+                    col_orig, col_translate = st.columns(2)
+
+                    with col_orig:
+                        download_selected_original = st.button(
+                            f"⬇️ Download {num_selected} Selected (Original)",
+                            key="download_selected_orig",
+                            help="Download selected subtitles in their original language (fast)",
+                            use_container_width=True
+                        )
+
+                    with col_translate:
+                        download_selected_translate = st.button(
+                            f"🔄 Download {num_selected} Selected + Translate to FA",
+                            key="download_selected_translate",
+                            type="primary",
+                            help="Download and translate selected subtitles to Persian (slower)",
+                            use_container_width=True
+                        )
+
+                    if download_selected_original or download_selected_translate:
+                        should_translate = download_selected_translate
+                        try:
+                            progress_container = st.container()
+
+                            with progress_container:
+                                zip_buffer = io.BytesIO()
+
+                                with st.spinner(f"Preparing to download {num_selected} subtitle(s)..."):
+                                    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                                        progress_bar = st.progress(0)
+                                        status_text = st.empty()
+
+                                        item_ids = list(st.session_state.selected_items)
+                                        for idx, item_id in enumerate(item_ids):
+                                            try:
+                                                item = st.session_state.item_map[item_id]
+
+                                                # Show download status
+                                                lang_label = item.language.upper()
+                                                status_text.info(f"📥 Downloading [{lang_label}] {item.release or item.file_name}... ({idx + 1}/{num_selected})")
+
+                                                # Determine target language
+                                                target_lang = "fa" if should_translate else item.language
+
+                                                # Create a progress callback for translation
+                                                translation_status = st.empty()
+
+                                                def progress_callback(current: int, total: int, pct: float):
+                                                    translation_status.info(f"🔄 Translating... {int(pct)}% (chunk {current}/{total})")
+
+                                                # Download the subtitle
+                                                result = service.download_selected(
+                                                    movie_name=movie_name,
+                                                    item=item,
+                                                    target_lang=target_lang,
+                                                    progress_callback=progress_callback if should_translate and item.language != "fa" else None,
+                                                )
+
+                                                translation_status.empty()
+
+                                                # Add to zip with a meaningful name
+                                                safe_name = (item.release or item.file_name or item.subtitle_id).replace("/", "_").replace("\\", "_")
+                                                file_name = f"{safe_name}.{target_lang}.srt"
+                                                zip_file.writestr(file_name, result.content_text)
+
+                                                # Update progress
+                                                progress = (idx + 1) / num_selected
+                                                progress_bar.progress(progress)
+                                                status_text.success(f"✅ Completed ({idx + 1}/{num_selected})")
+                                            except Exception as ep_error:
+                                                status_text.warning(f"❌ Failed: {str(ep_error)}")
+                                                continue
+
+                                        status_text.success("All selected subtitles downloaded!")
+                                        progress_bar.progress(1.0)
+
+                                # Store the zip data
+                                zip_buffer.seek(0)
+                                zip_filename = f"{movie_name.replace(' ', '_')}_selected_subtitles.zip"
+                                st.session_state.selected_download_data = (zip_buffer.getvalue(), zip_filename)
+
+                                # Rerun to show download button
+                                st.rerun()
+                        except Exception as exc:
+                            st.error(f"Error downloading selected subtitles: {exc}")
         else:
             # Movie mode - simple dropdown
             filter_text = st.text_input(
