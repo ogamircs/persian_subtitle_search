@@ -163,6 +163,7 @@ class OpenSubtitlesMCPStdioAdapter(SubtitleSearchTool):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=merged_env,
+            shell=(sys.platform == "win32"),
         )
 
         print(f"[DEBUG] Subprocess started, PID={process.pid}", flush=True)
